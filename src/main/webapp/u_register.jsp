@@ -85,16 +85,46 @@
             throw new SQLException("Database connection is null");
         }
 
-        try (Connection connection = con;
-             PreparedStatement ps = connection.prepareStatement(
-                     "INSERT INTO users(name, email, phone, password) VALUES (?, ?, ?, ?)")) {
+        try (Connection connection = con) {
+            connection.setAutoCommit(false);
+            try {
+                int nextUserId = 1;
 
-            ps.setString(1, name);
-            ps.setString(2, email);
-            ps.setString(3, phone);
-            ps.setString(4, password);
+                try (PreparedStatement nextIdStmt = connection.prepareStatement(
+                        "SELECT user_id FROM users ORDER BY user_id DESC LIMIT 1 FOR UPDATE");
+                     ResultSet rs = nextIdStmt.executeQuery()) {
+                    if (rs.next()) {
+                        nextUserId = rs.getInt(1) + 1;
+                    }
+                }
 
-            registered = ps.executeUpdate() > 0;
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "INSERT INTO users(user_id, name, email, phone, password) VALUES (?, ?, ?, ?, ?)")) {
+
+                    ps.setInt(1, nextUserId);
+                    ps.setString(2, name);
+                    ps.setString(3, email);
+                    ps.setString(4, phone);
+                    ps.setString(5, password);
+
+                    registered = ps.executeUpdate() > 0;
+                }
+
+                connection.commit();
+            } catch (Exception e) {
+                try {
+                    connection.rollback();
+                } catch (SQLException ignore) {
+                    // Ignore rollback errors and surface the original failure.
+                }
+                throw e;
+            } finally {
+                try {
+                    connection.setAutoCommit(true);
+                } catch (SQLException ignore) {
+                    // Ignore cleanup errors.
+                }
+            }
         }
     } catch (Exception e) {
         errorMessage = e.getMessage();
